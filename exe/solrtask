@@ -20,7 +20,6 @@ _tasks = %w[status start stop install collections cores schema fields]
 
 hopts = OptionParser.new do |opts|
 
-
     opts.banner = "Usage: solrtask [options] task [core/collection]"
     opts.banner << "\ntask is one of:\n\t#{_tasks.join("|")}"
     
@@ -83,10 +82,12 @@ def installed?(server)
 end
 
 def install(server)
-    puts "Server: #{server.install_dir}"
     if not installed?(server)
+        puts "Instaation not found in #{server.install_dir}.  Starting installation"
         f = SolrTasks::Fetcher.new(server.install_dir, server.version)
         f.install
+    else
+        puts "Solr #{server.version} is already installed to #{server.install_dir}"
     end
 end
 

@@ -359,7 +359,7 @@ module SolrTasks
         # This will overwrite any files already in the destination!
         def extract
             dest = nil
-            SolrTasks.logger info "Extracting #{@source}"
+            SolrTasks.logger.info "Extracting #{@source} to #{@dest}"
             Gem::Package::TarReader.new(Zlib::GzipReader.open(@source)) do
                    |tar|
                 tar.each do |entry|
@@ -447,13 +447,18 @@ module SolrTasks
         # and verifies the download
         def fetch
             if not File.size? @target
+                SolrTasks.logger.info "Fetching Solr #{@version} from #{get_download_uri}"
                 File.open(@target,'w') do |f|
                     IO.copy_stream( open(get_download_uri),f )
                 end
+            else
+                SolrTasks.logger.info "Solr #{@version} already downloaded to #{@target}"
             end
             if not verify
-                puts "Checksums don't match.  Not unpacking"
+                SolrTasks.logger.error "Checksums don't match.  Not unpacking"
                 exit 1
+            else
+                SolrTasks.logger.info "SHA-1 checksum looks good."
             end
         end
 
@@ -462,6 +467,7 @@ module SolrTasks
         end
 
         def unpack
+            SolrTasks.logger.info "Unpacking Solr #{version} to #{@output_dir}"
             e = Extractor.new(@target,@output_dir)
             if not File.directory? @output_dir
                 FileUtils.mkdir_p @output_dir
@@ -471,6 +477,7 @@ module SolrTasks
 
         def install
             if not installed?
+                SolrTasks.logger.info "Solr #{@version} not found.   installing"
                 fetch
                 verify
                 unpack
