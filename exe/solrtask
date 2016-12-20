@@ -1,0 +1,126 @@
+#!/usr/bin/env ruby
+
+require 'optparse'
+require 'solrtasks'
+require 'pathname'
+
+options = {
+    :cache_dir => File.expand_path(".solrtask", "~"),
+    :url => 'http://localhost:8983/solr',
+    :install_base => File.expand_path("solr-dir"),
+    :version => '6.3.0',
+}
+
+current_path = Pathname.getwd
+def_cache = Pathname.new(options[:cache_dir]).relative_path_from(current_path)
+def_install = Pathname.new(options[:install_base]).relative_path_from(current_path)
+def_solr = Pathname.new(options[:install_base]).join("solr-#{options[:version]}").relative_path_from(current_path)
+
+_tasks = %w[status start stop install collections cores schema fields]
+
+hopts = OptionParser.new do |opts|
+
+
+    opts.banner = "Usage: solrtask [options] task [core/collection]"
+    opts.banner << "\ntask is one of:\n\t#{_tasks.join("|")}"
+    
+    opts.banner << "\n\nThe final argument is required for the 'schema' and 'fields' tasks.\n\nOptions: \n\n"
+
+
+    opts.on('-uURL', '--url=URL', "URL of the solr server to query",
+        "default: #{options[:url]}") do |url|
+        options[:url] = url
+    end
+
+    opts.on('-iDIRECTORY', '--install-base=DIRECTORY', "Parent directory for Solr installs", "default: ./#{def_install}") do |the_dir|
+        options[:install_base] = the_dir
+    end
+
+    opts.on('-sDIRECTORY', '--solr-directory=DIRECTORY', "Complete path to Solr installation", 
+        "\t*** OVERRIDES -i ***",
+        "default ./#{def_solr}") do |the_dir|
+        opts[:install_dir] = the_dir
+    end
+
+    opts.on('-cCACHEDIR', '--cache-dir=CACHEDIR', "Directory to store downloads", "default: #{options[:cache_dir]}") do |cd|
+        options[:cache_dir] = cd
+    end
+
+    opts.on('-vVERSION', '--version=VERSION', 'The solr version to be installed',
+        "default: #{options[:version]}") do version
+        options[:version] = version
+    end
+
+    opts.on('-l', '--loud', 'Print detailed output while running') do
+        config[:verbose] = true
+    end
+
+    opts.on('-h', '--help', "Print help for this command") do 
+        puts opts
+        exit 0
+    end
+end
+
+hopts.parse!
+
+command = ARGV[0] || 'status'
+if %w[schema fields].include? command 
+    cname = ARGV[1] or raise "[core/collection name] is required for the '#{command}'' command"
+end
+
+server = SolrTasks::Server.new(options)
+
+def status(server)
+    if server.is_running? 
+        ["Solr is running on port #{server.port}", 0]
+    else
+        ["Solr is not running on port #{server.port}", 1]
+    end
+end
+
+def installed?(server)
+    File.exist?(server.install_dir)
+end
+
+def install(server)
+    puts "Server: #{server.install_dir}"
+    if not installed?(server)
+        f = SolrTasks::Fetcher.new(server.install_dir, server.version)
+        f.install
+    end
+end
+
+def start(server)
+    server.start unless server.is_running?
+end
+
+def stop(server)
+    server.stop 
+end
+
+case command 
+    when 'install' 
+        install(server)
+    when 'status'        
+        msg, es = status(server)
+        puts msg
+        exit es
+    when 'start'
+        raise "You must 'install 'the server first" if not installed?(server)
+        start(server)
+    when 'stop'
+        stop(server)
+    when 'collections'
+        puts server.get_collections
+    when 'cores'
+        puts server.get_cores
+    when 'schema'    
+            puts server.get_schema(cname, 'schema.xml')
+   when 'fields'
+           puts server.get_fields(cname)
+    else
+        puts hopts
+        puts  "\n\nUnknown task '#{command}'"
+        exit 2
+end
+
