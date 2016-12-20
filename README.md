@@ -44,11 +44,12 @@ Most of these are intended to interact with a Solr server running on the same ho
 
 ### Rake tasks
 
-Rake tasks are automatically made available to a Rails application that uses this gem.  For other kinds of application in which you want to access the tasks, try these (instructions from Andy Atkinson)[http://andyatkinson.com/blog/2014/06/23/sharing-rake-tasks-in-gems]
+Rake tasks are automatically made available to a Rails application that uses this gem.  For other kinds of application in which you want to access the tasks, try these [instructions from Andy Atkinson](http://andyatkinson.com/blog/2014/06/23/sharing-rake-tasks-in-gems).  Once you've got the tasks loading, you 
+can view them via `rake --tasks` (or `bundle exec rake --tasks`) -- they are in the `solrtask` namespace.
 
 ### Library
 
-`SolrTasks::Server` is the primary class for interacting with a Solr server, but you might want to use `SolrTasks::Fetcher` to automate installs.  View the source code or generate documentation with `yard` for more information on usage.
+`SolrTasks::Server` is the primary class for interacting with a Solr server, but you might want to use `SolrTasks::Fetcher` to help automate installs.  View the source code or generate documentation with `yard` for more information on usage.
 
 ## Development
 
