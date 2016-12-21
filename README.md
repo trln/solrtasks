@@ -1,6 +1,6 @@
 # SolrTasks
 
-A Ruby gem that provides some tools for installing, configuring, and running an [Apache Solr(https://lucene.apache.org/solr) instance.  Includes
+A Ruby gem that provides some tools for installing, configuring, and running an [Apache Solr](https://lucene.apache.org/solr) instance.  Includes
 rake tasks and a Railtie to make those tasks avaialble when this gem is used in a Rails application.  There is also a command line tool, which is mostly 
 useful for automating the download.
 
