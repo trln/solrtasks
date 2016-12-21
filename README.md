@@ -1,6 +1,6 @@
 # SolrTasks
 
-A Ruby gem that provides some tools for installing, configuring, and running an (Apache Solr)[https://lucene.apache.org/solr] instance.  Includes
+A Ruby gem that provides some tools for installing, configuring, and running an [Apache Solr(https://lucene.apache.org/solr) instance.  Includes
 rake tasks and a Railtie to make those tasks avaialble when this gem is used in a Rails application.  There is also a command line tool, which is mostly 
 useful for automating the download.
 
@@ -46,6 +46,8 @@ Most of these are intended to interact with a Solr server running on the same ho
 
 Rake tasks are automatically made available to a Rails application that uses this gem.  For other kinds of application in which you want to access the tasks, try these [instructions from Andy Atkinson](http://andyatkinson.com/blog/2014/06/23/sharing-rake-tasks-in-gems).  Once you've got the tasks loading, you 
 can view them via `rake --tasks` (or `bundle exec rake --tasks`) -- they are in the `solrtask` namespace.
+
+When used in Rails, the rake tasks will look in `$RAILS_ROOT/config/solrtask.yml` for a configuration file.  Outside of Rails, the environment variable `SOLRTASK_CONFIG` will be used, with `solrtask.yml` in the working directory used as a fallback.
 
 ### Library
 

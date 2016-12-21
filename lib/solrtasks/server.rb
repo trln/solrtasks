@@ -24,7 +24,7 @@ module SolrTasks
     DEFAULT_CONFIG  = { 
         :version => '6.3.0',
         :uri_base => 'http://localhost:8983/solr/' ,
-        :install_base => File.expand_path( './solr/'),
+        :install_base => File.expand_path( './solr-versions/'),
     }
 
     # Utilities for working with a Solr installation.  Supports:
@@ -52,7 +52,7 @@ module SolrTasks
     class Server
 
         attr_accessor :base_uri, :port, :install_dir, :version
-        attr_reader :solr_cmd
+        attr_reader :solr_cmd, :config
 
         # Loads a new instance with configuration taken from a file in YAML format.  See
         # 
@@ -88,10 +88,9 @@ module SolrTasks
             @version = @config[:version]
             @install_dir =  options[:install_dir] || File.absolute_path(@config[:install_base])
             @solr_cmd = File.join(@install_dir, "solr-#{@version}/bin/solr")
+            @config.update({ :install_dir => @install_dir, :solr_cmd => @solr_cmd, :port => @port, :version => @version })
             Cocaine::CommandLine.logger = Logger.new(logger) if @config[:verbose]
-            @logger = SolrTasks.logger
-            
-
+            @logger = options[:logger] || SolrTasks.logger
         end
 
         # Checks whether the server is running
@@ -121,7 +120,7 @@ module SolrTasks
                 data = JSON.parse(res.body)
                 return data.has_key?('cores') ? data['cores'] : []
             else
-                puts res.body
+                SolrTasks.logger.error res.body
                 exit 1
             end
         end
@@ -143,7 +142,7 @@ module SolrTasks
                 data = JSON.parse(res.body)
                 return data.has_key?('collections') ? data['collections'] : []
             else
-                puts res.body
+                SolrTasks.logger.error res.body
                 exit 1
             end
         end
@@ -221,7 +220,7 @@ module SolrTasks
                 create_line.run(args: args)
                 true
             rescue Cocaine::ExitStatusError => e
-                puts e
+                SolrTasks.logger.error e
                 false
             end
         end
@@ -239,7 +238,7 @@ module SolrTasks
                 create_line.run(args: args)
                 true
              rescue Cocaine::ExitStatusError => e
-                    puts e
+                    SolrTasks.logger.error e
                     false
             end
         end
@@ -259,9 +258,8 @@ module SolrTasks
             )
             res = Net::HTTP.get_response(uri)
             if not res.is_a?(Net::HTTPSuccess)
-                puts "Core creation failed, code was #{res.code} : #{res.message}"
-                puts "Response body:"
-                puts res.body
+                SolrTasks.logger.error "Core creation failed, code was #{res.code} : #{res.message}"
+                SolrTasks.logger.error "Response body: #{res.body}"
                 return false
             end
             true
@@ -289,9 +287,9 @@ module SolrTasks
             )
             res = Net::HTTP.get_response(uri)
             if not res.is_a?(Net::HTTPSuccess)
-                puts "Core delete (unload) failed, code was #{res.code} : #{res.message}"
-                puts "Response body:"
-                puts res.body
+                SolrTasks.logger.error "Core delete (unload) failed, code was #{res.code} : #{res.message}"
+                SolrTasks.logger.error "Response body:"
+                SolrTasks.logger.error res.body
                 return false
             end
             true
@@ -307,9 +305,9 @@ module SolrTasks
                     @solr_cmd,
                     ":args")
                 start_line.run( args: [ 'start', '-c', '-p', @port ])
-                puts "Started solr on port #{@port}"
+                SolrTasks.logger.error "Started solr on port #{@port}"
             rescue Cocaine::ExitStatusError => e
-                puts e
+                SolrTasks.logger.error e
                 false
             end
             true
@@ -323,7 +321,7 @@ module SolrTasks
                 stop_line.run(args: ["stop", "-p", @port ])
                 true
             rescue Cocaine::ExitStatusError => e
-                puts e
+                SolrTasks.logger.error e
                 false
             end
         end
@@ -497,7 +495,7 @@ module SolrTasks
                 end
             end
             if not File.exists? @target
-                puts "Can't verify file.  Call fetch first"
+                SolrTasks.logger.error "Can't verify file.  Call fetch first"
                 exit 1
             end
             actual_sha = Digest::SHA1.file(@target).hexdigest()

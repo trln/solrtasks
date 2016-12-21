@@ -1,31 +1,43 @@
 require 'solrtasks'
 require 'yaml'
 require 'cocaine'
+require 'pp'
 
+RAILS_CONFIG = 'config/solrtask.yml'
+
+config={}
 if defined?(Rails) 
     rails_environment=Rails.env || 'development'
-    config_file = File.join(Rails.root, "config/solr.yml")
-    if File.exist?(config_file)
-    else 
-        Rails.logger.warn "No config/solr.yml found, using defaults"        
+    config_file = File.join(Rails.root, RAILS_CONFIG)
+    if File.exist?(config_file) 
+       puts "Loading config from #{config_file}"   
+       config = File.open(config_file) {|f| YAML.load(f)[rails_environment] }
+       Rails.logger.warn "Unable to find configuration for environment '#{rails_environment}', using defaults" if config.empty?
+    else
+        Rails.logger.warn "No #{RAILS_CONFIG} found, using defaults"        
     end
     say = lambda { |msg| Rails.logger.info msg }
 else
-    config_file = ENV['SOLR_CONFIG'] || 'solr.yml'
+    config_file = ENV['SOLRTASK_CONFIG'] || 'solrtask.yml'
     if File.exist?(config_file)
-        server = SolrTasks::Server.from_file(config_file)
-    else
-        puts "No solr.yml config file found, using defaults"  
+        config = File.open(config_file) { |f| YAML.load(f) }
+        puts "No solrtask.yml config file found, using defaults"  
     end
     say = puts
-
 end
+
+server = SolrTasks::Server.new(config) unless config.empty?
 
 server ||= SolrTasks::Server.new
 
 desc "Tasks for Solr installlation, start/stop and schema management"
-namespace :solrtask do    
-    solr_port = server.port
+namespace :solrtask do        
+
+    desc "Shows configuration, including computed values"
+    task :show_config => :environment do
+        pp server.config
+        puts "Base confguration loaded from #{config_file}" if File.exists?(config_file) 
+    end
 
     desc "Lists available collections"
     task :collections => :environment do
@@ -42,6 +54,7 @@ namespace :solrtask do
 
     desc "Installs solr (if necessary)"
     task :install => :environment do
+
         if not File.exist?(server.install_dir)	
             f = SolrTasks::Fetcher.new(server.install_dir, server.version)
             f.install
