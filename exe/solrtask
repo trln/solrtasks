@@ -46,7 +46,7 @@ hopts = OptionParser.new do |opts|
     end
 
     opts.on('-vVERSION', '--version=VERSION', 'The solr version to be installed',
-        "default: #{options[:version]}") do version
+        "default: #{options[:version]}") do |version|
         options[:version] = version
     end
 
