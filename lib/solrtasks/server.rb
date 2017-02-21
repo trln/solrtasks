@@ -51,7 +51,7 @@ module SolrTasks
     #   @return [String] the path to the 'solr' binary used to start/stop the instance
     class Server
 
-        attr_accessor :base_uri, :port, :install_dir, :version
+        attr_accessor :base_uri, :port, :install_dir, :solr_dir, :version
         attr_reader :solr_cmd, :config
 
         # Loads a new instance with configuration taken from a file in YAML format.  See
@@ -86,11 +86,14 @@ module SolrTasks
             @base_uri = URI(uri_base)
             @port = @base_uri.port
             @version = @config[:version]
+
             @install_dir =  options[:install_dir] || File.absolute_path(@config[:install_base])
-            @solr_cmd = File.join(@install_dir, "solr-#{@version}/bin/solr")
+            @solr_dir = File.join(@install_dir, "solr-#{@version}")
+
+            @solr_cmd = File.join(@solr_dir, "bin/solr")
             @config.update({ :install_dir => @install_dir, :solr_cmd => @solr_cmd, :port => @port, :version => @version })
             Cocaine::CommandLine.logger = Logger.new(logger) if @config[:verbose]
-            @logger = options[:logger] || SolrTasks.logger
+            @logger = @config[:logger] || SolrTasks.logger
         end
 
         # Checks whether the server is running
@@ -316,11 +319,13 @@ module SolrTasks
         # issues a 'stop' command to the server
         # @return [true,false] whether the command succeeded
         def stop
+            raise "Solr binary not available at #{@solr_cmd}" unless File.exist?(@solr_cmd)
             begin 
                 stop_line = Cocaine::CommandLine.new(@solr_cmd,':args')
                 stop_line.run(args: ["stop", "-p", @port ])
                 true
             rescue Cocaine::ExitStatusError => e
+                puts "\tLooked in #{@solr_cmd}"
                 SolrTasks.logger.error e
                 false
             end

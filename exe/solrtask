@@ -4,24 +4,43 @@ require 'optparse'
 require 'solrtasks'
 require 'pathname'
 
+DEFAULT_VERSION = '6.3.0'
+
 options = {
     :cache_dir => File.expand_path(".solrtask", "~"),
     :url => 'http://localhost:8983/solr',
     :install_base => File.expand_path("solr-dir"),
-    :version => '6.3.0',
+    :version => DEFAULT_VERSION,
 }
+
+_tasks = %w[status start stop install collections cores schema fields version list]
+
+# flag to detect whether version was passed in as an option
+version_set = false
+
+# some basic paths
 
 current_path = Pathname.getwd
 def_cache = Pathname.new(options[:cache_dir]).relative_path_from(current_path)
 def_install = Pathname.new(options[:install_base]).relative_path_from(current_path)
-def_solr = Pathname.new(options[:install_base]).join("solr-#{options[:version]}").relative_path_from(current_path)
 
-_tasks = %w[status start stop install collections cores schema fields]
+# This is the default
+def_solr = Pathname.new(options[:install_base]).join("solr-#{options[:version]}").relative_path_from(current_path)
 
 hopts = OptionParser.new do |opts|
 
     opts.banner = "Usage: solrtask [options] task [core/collection]"
     opts.banner << "\ntask is one of:\n\t#{_tasks.join("|")}"
+    opts.banner << "\n\tstatus - show status of solr server\n"
+    opts.banner << "\tstart - starts solr server\n"
+    opts.banner << "\tstop - stops solr server\n"
+    opts.banner << "\tinstall - installs solr\n"
+    opts.banner << "\tversion - shows current version of solr\n"
+    opts.banner << "\tlist - shows all installed versions of solr\n"
+    opts.banner << "\tcollections - list collections in currently running solr\n"
+    opts.banner << "\tcores - list cores in currently running solr\n"
+    opts.banner << "\tfields - shows fileds in named collection/core\n"
+    opts.banner << "\tschema - shows schema.xml for named collection/core"
     
     opts.banner << "\n\nThe final argument is required for the 'schema' and 'fields' tasks.\n\nOptions: \n\n"
 
@@ -45,8 +64,9 @@ hopts = OptionParser.new do |opts|
         options[:cache_dir] = cd
     end
 
-    opts.on('-vVERSION', '--version=VERSION', 'The solr version to be installed',
+    opts.on('-vVERSION', '--version=VERSION', 'Set current solr version',
         "default: #{options[:version]}") do |version|
+        version_set = true
         options[:version] = version
     end
 
@@ -67,27 +87,62 @@ if %w[schema fields].include? command
     cname = ARGV[1] or raise "[core/collection name] is required for the '#{command}'' command"
 end
 
+# if the version was explicitly set on the command line
+# or no version was previously set, write it to a file
+$version_file=File.join(options[:install_base], ".current_version")
+if version_set or not File.exist?($version_file)
+    FileUtils.mkdir_p(options[:install_base]) if not File.exist?(options[:install_base])
+    File.open($version_file,'w') do |f|
+        f.write(options[:version])
+    end
+else
+    if File.exist?($version_file)
+        options[:version] = File.read($version_file)
+    end
+end
+
 server = SolrTasks::Server.new(options)
 
 def status(server)
     if server.is_running? 
-        ["Solr is running on port #{server.port}", 0]
+        ["Solr #(get_current_version) is running on port #{server.port}", 0]
     else
-        ["Solr is not running on port #{server.port}", 1]
+        ["Solr #{get_current_version} is not running on port #{server.port}", 1]
     end
 end
 
 def installed?(server)
-    File.exist?(server.install_dir)
+    File.exist?(server.solr_dir)
+end
+
+def uninstall(server)
+    if not installed?(server)
+        puts "Solr #{get_current_version} is not installed"
+    else
+        if server.is_running?
+            puts "Server appears to be running.  Please shut it down first"
+            exit 1
+        end
+        print "This will delete #{server.solr_dir} and its contents.  Are you sure(y/N)? "
+        input = $stdin.gets.chomp
+        if input.downcase != 'y'
+            puts "OK, not deleting"
+            return
+        end
+        puts "Removing #{server.solr_dir} and its contents"
+        FileUtils.rm_rf([server.solr_dir], secure: true)
+        FileUtils.rm_f([$version_file]) if File.exist?($version_file)
+    end
 end
 
 def install(server)
     if not installed?(server)
-        puts "Instaation not found in #{server.install_dir}.  Starting installation"
+        puts "Installation not found in #{server.install_dir}.  Starting installation"
         f = SolrTasks::Fetcher.new(server.install_dir, server.version)
         f.install
     else
-        puts "Solr #{server.version} is already installed to #{server.install_dir}"
+
+        puts "Solr #{server.version} is already installed to #{server.solr_dir}"
     end
 end
 
@@ -96,12 +151,39 @@ def start(server)
 end
 
 def stop(server)
-    server.stop 
+    server.stop if server.is_running?
+end
+
+def get_current_version
+    File.exist?($version_file) ? File.read($version_file) : options[:version]
 end
 
 case command 
+    when 'list'
+        cv = get_current_version
+        solrdirs = Pathname.new(options[:install_base]).children.select &:directory?
+        versions = Hash[solrdirs.map do |d|
+            r = d.basename.to_s.match(/^solr-(\d+\.\d+\.\d+)/)
+            [ d , r ? r[1] :false ]
+        end.select { |k,v| v }] 
+
+        solrdirs.sort_by {|v| Gem::Version.new(versions[v]) }.each do |d|
+            ver = versions[d]
+            print "* " if cv == ver
+            puts "#{ver}" 
+        end
+        exit 0
+
+    when 'version'
+        v = get_current_version
+        puts "Solr version currently set to #{v}"
+        exit 0
     when 'install' 
         install(server)
+        exit 0
+    when 'uninstall'
+        uninstall(server)
+        exit 0 
     when 'status'        
         msg, es = status(server)
         puts msg
