@@ -51,7 +51,7 @@ module SolrTasks
     #   @return [String] the path to the 'solr' binary used to start/stop the instance
     class Server
 
-        attr_accessor :base_uri, :port, :install_dir, :version
+        attr_accessor :base_uri, :port, :install_dir, :instance_dir, :version
         attr_reader :solr_cmd, :config
 
         # Loads a new instance with configuration taken from a file in YAML format.  See
@@ -87,7 +87,8 @@ module SolrTasks
             @port = @base_uri.port
             @version = @config[:version]
             @install_dir =  options[:install_dir] || File.absolute_path(@config[:install_base])
-            @solr_cmd = File.join(@install_dir, "solr-#{@version}/bin/solr")
+            @instance_dir = File.join(@install_dir, "solr-#{@version}/")
+            @solr_cmd = File.join(@instance_dir, "bin/solr")
             @config.update({ :install_dir => @install_dir, :solr_cmd => @solr_cmd, :port => @port, :version => @version })
             Cocaine::CommandLine.logger = Logger.new(logger) if @config[:verbose]
             @logger = options[:logger] || SolrTasks.logger
@@ -305,7 +306,7 @@ module SolrTasks
                     @solr_cmd,
                     ":args")
                 start_line.run( args: [ 'start', '-c', '-p', @port ])
-                SolrTasks.logger.error "Started solr on port #{@port}"
+                SolrTasks.logger.info "Started solr on port #{@port}"
             rescue Cocaine::ExitStatusError => e
                 SolrTasks.logger.error e
                 false
@@ -407,7 +408,7 @@ module SolrTasks
     #         to "#{output_dir}/solr-#{version}"
     class Fetcher
 
-        MIRROR_BASE = "https://www.apache.org/dyn/closer.lua/lucene/solr/%{version}"
+        MIRROR_BASE = "https://www.apache.org/dyn/closer.lua/lucene/solr/%{version}?as_json=1"
 
         SHA_BASE = "https://archive.apache.org/dist/lucene/solr/%{version}/solr-%{version}.tgz.sha1"
 
@@ -445,9 +446,11 @@ module SolrTasks
         # and verifies the download
         def fetch
             if not File.size? @target
-                SolrTasks.logger.info "Fetching Solr #{@version} from #{get_download_uri}"
+                fetch_uri = get_download_uri
+                raise "Cannot find mirror for Solr #{@version}.  Sorry" unless fetch_uri
+                SolrTasks.logger.info "Fetching Solr #{@version} from #{fetch_uri}"
                 File.open(@target,'w') do |f|
-                    IO.copy_stream( open(get_download_uri),f )
+                    IO.copy_stream( open(fetch_uri),f )
                 end
             else
                 SolrTasks.logger.info "Solr #{@version} already downloaded to #{@target}"
@@ -505,19 +508,38 @@ module SolrTasks
 
         private
 
-        def fetch_download_uri 
-            page = Nokogiri::HTML(Net::HTTP.get(@mirror_uri))
-            dl_index = page.css(".container a").select { |link|
-                link['href'] =~ /#{@version}$/
-            }[0]['href']
-            dl_index += '/' unless dl_index[-1] == '/'
-            dl_page = Nokogiri::HTML(Net::HTTP.get(URI(dl_index)))
-            dl_path = dl_page.css("a").select {
-                |link|
-                link['href'] =~ /solr-#{@version}.tgz/
-            }[0]['href']
+        # closest mirror doesn't always have what we want, especially if it's
+        # an older version.  Let's give ourselves a fighting chance!
+        def find_best_mirrors(count=3)
+            paths = [] 
+            data = {}
+            open(@mirror_uri) do |json_data|
+                data = JSON.load(json_data)
+                servers = [ data['preferred'], data['http'] ] .flatten[0..count-1]
+                paths = servers.collect { |s| URI.join(s, data['path_info']+'/') }
+            end
+            # add the primary US site as a LAST resort ...
+            paths << URI.join( data['backup'][1], data['path_info']+'/' )
+        end
 
-            URI.join(dl_index,dl_path)
+        def fetch_download_uri 
+            SolrTasks.logger.debug "Finding download location for '#{@version}' from #{@mirror_uri}"
+            paths = find_best_mirrors
+            SolrTasks.logger.debug "Will check #{paths}"
+            candidates = paths.map do |path|
+                SolrTasks.logger.debug "trying #{path}"
+                resp = Net::HTTP.get_response(path)
+                if resp.is_a?(Net::HTTPSuccess)
+                    dl_page = Nokogiri::HTML(resp.body)
+                    puts dl_page
+                    dl_path = dl_page.css("a").select {
+                        |link|
+                        link['href'] =~ /solr-#{@version}.tgz/
+                    }[0]['href']
+                    URI.join(path,dl_path)
+                end
+            end.lazy.first 
+            candidates
         end
     end # class
 end #module

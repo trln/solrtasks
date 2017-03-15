@@ -1,5 +1,6 @@
 #!/usr/bin/env ruby
 
+require 'fileutils'
 require 'optparse'
 require 'solrtasks'
 require 'pathname'
@@ -8,8 +9,10 @@ options = {
     :cache_dir => File.expand_path(".solrtask", "~"),
     :url => 'http://localhost:8983/solr',
     :install_base => File.expand_path("solr-dir"),
-    :version => '6.3.0',
+    :default_version => '6.3.0',
 }
+
+version_set = false
 
 current_path = Pathname.getwd
 def_cache = Pathname.new(options[:cache_dir]).relative_path_from(current_path)
@@ -45,13 +48,24 @@ hopts = OptionParser.new do |opts|
         options[:cache_dir] = cd
     end
 
-    opts.on('-vVERSION', '--version=VERSION', 'The solr version to be installed',
-        "default: #{options[:version]}") do version
+    opts.on('-v', '--version [VERSION]', 'The solr version to be installed',
+        "default: #{options[:default_version]}") do |version|
+        if version.nil?
+            version_file = File.join(options[:install_base], ".current_version")
+            version = File.exists?(version_file) ? File.read(version_file) : options[:version]
+            puts "Current version is #{version}"
+            exit 0
+        end
         options[:version] = version
+        version_set = true
     end
 
     opts.on('-l', '--loud', 'Print detailed output while running') do
-        config[:verbose] = true
+        options[:verbose] = true
+    end
+
+    opts.on("--noop", "Don't write any files, just output what would be done") do
+        options[:noop] = true
     end
 
     opts.on('-h', '--help', "Print help for this command") do 
@@ -63,8 +77,66 @@ end
 hopts.parse!
 
 command = ARGV[0] || 'status'
+
 if %w[schema fields].include? command 
     cname = ARGV[1] or raise "[core/collection name] is required for the '#{command}'' command"
+end
+
+# functions for querying and persisting current Solr version number
+
+def installed?(server)
+    File.directory?(server.instance_dir)
+end
+
+def write_version(options)
+    vf = options[:version_file]
+    vdir = File.basename(vf)
+    if not File.directory?(vdir)
+        if options[:noop]
+            puts "\t[test] would create #{vdir}"
+        else
+            FileUtils.mkdir_p(vdir)
+        end
+    end
+
+    if options[:noop] 
+        puts "\t[test] would write version '#{options[:version]}' to #{vf}"
+    else
+        File.open(vf, "w") do |f| 
+            f.write(options[:version])
+        end
+    end
+end
+
+def find_version_file(options)
+    base_dir = options[:install_base]
+    File.join(base_dir, ".current_version")
+end
+
+options[:version_file] = find_version_file(options)
+
+# if solr version was set at command line, 
+# write that value to a file so it becomes the 
+# default version, but ONLY IF
+#  1. the version is installed AND
+#  2. we are installing or starting
+if options.key?(:version)
+    temp_server = SolrTasks::Server.new(options)
+    if ['install', 'start'].include?(command)
+        if installed?(temp_server)
+            puts "\tSetting active Solr version to #{options[:version]}"
+            write_version(options)
+        end
+    end
+else
+    # if version wasn't set at command line, try to read the version
+    # file and create it with the default value if it doesn't exist.
+    if File.exist?(options[:version_file])
+        options[:version] = File.read(options[:version_file])
+    else
+        options[:version] = options[:default_version]
+        write_version(options)
+    end
 end
 
 server = SolrTasks::Server.new(options)
@@ -77,18 +149,21 @@ def status(server)
     end
 end
 
-def installed?(server)
-    File.exist?(server.install_dir)
-end
-
-def install(server)
+def install(server,options)
     if not installed?(server)
-        puts "Instaation not found in #{server.install_dir}.  Starting installation"
-        f = SolrTasks::Fetcher.new(server.install_dir, server.version)
-        f.install
+        puts "\tSolr not found in #{server.install_dir}."
+        if not options[:noop]
+            puts "\tStarting installation"
+            f = SolrTasks::Fetcher.new(server.install_dir, server.version)
+            f.install
+        else
+            puts "\t[test] Solr #{server.version} would be installed in #{server.install_dir}"
+        end
     else
-        puts "Solr #{server.version} is already installed to #{server.install_dir}"
+        puts "\tSolr #{server.version} is already installed"
+        puts "\t\t#{server.install_dir}"
     end
+    write_version(options)
 end
 
 def start(server)
@@ -96,12 +171,12 @@ def start(server)
 end
 
 def stop(server)
-    server.stop 
+    server.stop if server.is_running?
 end
 
 case command 
-    when 'install' 
-        install(server)
+    when 'install'
+        install(server,options)
     when 'status'        
         msg, es = status(server)
         puts msg
