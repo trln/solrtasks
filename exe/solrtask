@@ -7,7 +7,8 @@ require 'pathname'
 
 options = {
     :cache_dir => File.expand_path(".solrtask", "~"),
-    :url => 'http://localhost:8983/solr',
+    :local => true,
+    :uri_base => 'http://localhost:8983/solr',
     :install_base => File.expand_path("solr-dir"),
     :default_version => '6.3.0',
 }
@@ -19,20 +20,23 @@ def_cache = Pathname.new(options[:cache_dir]).relative_path_from(current_path)
 def_install = Pathname.new(options[:install_base]).relative_path_from(current_path)
 def_solr = Pathname.new(options[:install_base]).join("solr-#{options[:version]}").relative_path_from(current_path)
 
-_tasks = %w[status start stop install collections cores schema fields]
+_tasks = %w[status start stop install collections cores schema fieldsi create-collection harmonize-schema]
 
 hopts = OptionParser.new do |opts|
 
     opts.banner = "Usage: solrtask [options] task [core/collection]"
     opts.banner << "\ntask is one of:\n\t#{_tasks.join("|")}"
-    
     opts.banner << "\n\nThe final argument is required for the 'schema' and 'fields' tasks.\n\nOptions: \n\n"
 
-
-    opts.on('-uURL', '--url=URL', "URL of the solr server to query",
-        "default: #{options[:url]}") do |url|
-        options[:url] = url
+    opts.on('-u', '--url [URL]', "URL of the solr server to query",
+        "default: #{options[:uri_base]}") do |url|
+        options[:uri_base] = url
     end
+
+    opts.on('-r', '--remote', "Interact with a remote Solr server") do 
+        options[:local] = false
+    end
+
 
     opts.on('-iDIRECTORY', '--install-base=DIRECTORY', "Parent directory for Solr installs", "default: ./#{def_install}") do |the_dir|
         options[:install_base] = the_dir
@@ -76,10 +80,10 @@ end
 
 hopts.parse!
 
-command = ARGV[0] || 'status'
+command = ARGV.shift || 'status'
 
-if %w[schema fields].include? command 
-    cname = ARGV[1] or raise "[core/collection name] is required for the '#{command}'' command"
+if %w[schema fields create-collection harmonize-schema].include? command 
+    cname = ARGV.shift or raise "[core/collection name] is required for the '#{command}'' command"
 end
 
 # functions for querying and persisting current Solr version number
@@ -89,6 +93,7 @@ def installed?(server)
 end
 
 def write_version(options)
+    return unless options[:local]
     vf = options[:version_file]
     vdir = File.basename(vf)
     if not File.directory?(vdir)
@@ -102,6 +107,7 @@ def write_version(options)
     if options[:noop] 
         puts "\t[test] would write version '#{options[:version]}' to #{vf}"
     else
+        FileUtils.mkdir_p(File.dirname(vf)) unless File.directory? File.dirname(vf)
         File.open(vf, "w") do |f| 
             f.write(options[:version])
         end
@@ -115,29 +121,34 @@ end
 
 options[:version_file] = find_version_file(options)
 
-# if solr version was set at command line, 
+# if we are 'local' and solr version was set at command line, 
 # write that value to a file so it becomes the 
 # default version, but ONLY IF
 #  1. the version is installed AND
 #  2. we are installing or starting
-if options.key?(:version)
-    temp_server = SolrTasks::Server.new(options)
-    if ['install', 'start'].include?(command)
-        if installed?(temp_server)
-            puts "\tSetting active Solr version to #{options[:version]}"
+if options[:local] 
+    if options.key?(:version)
+        temp_server = SolrTasks::Server.new(options)
+        if ['install', 'start'].include?(command)
+            if installed?(temp_server)
+                puts "\tSetting active Solr version to #{options[:version]}"
+                write_version(options)
+            end
+        end
+    else
+        # if version wasn't set at command line, try to read the version
+        # file and create it with the default value if it doesn't exist.
+        if File.exist?(options[:version_file])
+            options[:version] = File.read(options[:version_file])
+        else
+            options[:version] = options[:default_version]
             write_version(options)
         end
     end
-else
-    # if version wasn't set at command line, try to read the version
-    # file and create it with the default value if it doesn't exist.
-    if File.exist?(options[:version_file])
-        options[:version] = File.read(options[:version_file])
-    else
-        options[:version] = options[:default_version]
-        write_version(options)
-    end
-end
+end # manage solr version state
+
+
+puts options
 
 server = SolrTasks::Server.new(options)
 
@@ -150,6 +161,7 @@ def status(server)
 end
 
 def install(server,options)
+    return unless options[:local]
     if not installed?(server)
         puts "\tSolr not found in #{server.install_dir}."
         if not options[:noop]
@@ -174,6 +186,10 @@ def stop(server)
     server.stop if server.is_running?
 end
 
+def if_running(server)
+    server.is_running? ? yield : "Solr is not running"
+end
+
 case command 
     when 'install'
         install(server,options)
@@ -186,15 +202,21 @@ case command
         start(server)
     when 'stop'
         stop(server)
+
+    when 'create-collection'
+        puts if_running(server) { server.create_collection(cname) }
     when 'collections'
-        puts server.get_collections
+        puts if_running(server) { server.get_collections }
     when 'cores'
-        puts server.get_cores
-    when 'schema'    
-            puts server.get_schema(cname, 'schema.xml')
+        puts if_running(server) { server.get_cores }
+    when 'harmonize-schema'
+        schema_file = ARGV.shift || abort("need a schema file")
+        puts if_running(server) { server.harmonize_schema(cname,schema_file)}
+    when 'schema'
+        puts if_running(server) { server.get_schema(cname,'schema.xml') }
    when 'fields'
-           puts server.get_fields(cname)
-    else
+       puts if_running(server) { server.get_fields(cname) } 
+   else
         puts hopts
         puts  "\n\nUnknown task '#{command}'"
         exit 2

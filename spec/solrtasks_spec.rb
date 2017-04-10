@@ -1,11 +1,17 @@
 require 'spec_helper'
+require 'solrtasks'
 
-describe Solrtasks do
+describe SolrTasks do
   it 'has a version number' do
-    expect(Solrtasks::VERSION).not_to be nil
+    expect(SolrTasks::VERSION).not_to be nil
   end
 
-  it 'does something useful' do
-    expect(false).to eq(true)
+  it 'autoloads Schema' do
+    begin
+        SolrTasks::Schema.new({},'dummy')
+    rescue
+        expect(false).to eq(true), "Encountered exception trying to autoload Schema"
+    end
   end
+
 end

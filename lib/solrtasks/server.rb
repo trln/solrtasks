@@ -15,6 +15,8 @@ require 'logger'
 
 module SolrTasks
 
+    autoload(:Schema, 'solrtasks/schema')
+
     class << self
         attr_accessor :logger
     end
@@ -23,6 +25,7 @@ module SolrTasks
 
     DEFAULT_CONFIG  = { 
         :version => '6.3.0',
+        :local => true,
         :uri_base => 'http://localhost:8983/solr/' ,
         :install_base => File.expand_path( './solr-versions/'),
     }
@@ -52,7 +55,7 @@ module SolrTasks
     class Server
 
         attr_accessor :base_uri, :port, :install_dir, :instance_dir, :version
-        attr_reader :solr_cmd, :config
+        attr_reader :solr_cmd, :config, :local
 
         # Loads a new instance with configuration taken from a file in YAML format.  See
         # 
@@ -70,6 +73,7 @@ module SolrTasks
         # @param options [Hash] the options hash.  iIf empty, DEFAULT_OPTIONS will be used.
         # @option options [String] :uri_base the base URI to the solr instance (usually ends with `/solr`), including the hostname
         #               and protocol (http/https). (the `port` attribute will be computed from this)
+        # @option options [Boolean] :local whether the server can be managed with local commands
         # @option options [String] :version the Solr version we are working with.
         # @option options [String] :install_base the base directory for downloaded servers, binaries, etc.  `:install_dir` 
         #               will be set to `@install_base/solr-@version` unless the :install_dir option is provided.
@@ -81,6 +85,7 @@ module SolrTasks
             defaults = Marshal.load(Marshal.dump(DEFAULT_CONFIG))
             # merge in any passed in options over defaults, converting keys to symbols
             @config = Hash[ defaults.merge(options).map {|(k,v)| [k.to_sym, v] } ]
+            @local = @config[:local]
             uri_base = @config[:uri_base]
             uri_base += '/' unless uri_base.end_with?('/')
             @base_uri = URI(uri_base)
@@ -98,10 +103,25 @@ module SolrTasks
         # Note this requires that the 'lsof' utility be installed.  This only works on *nix
         # systems.
         def is_running?            
+            begin
+                uri = URI(@base_uri)
+                Net::HTTP.start(uri.host, uri.port) do |http|
+                    http.open_timeout = 1
+                    http.read_timeout = 1
+                    http.head(uri.path)
+                end
+                return true
+            rescue
+                return false unless @config[:local] 
+            end
+
+            # as a backup when running locally, see if something's 
+            # holding the port open
             line = Cocaine::CommandLine.new(
                 "lsof -i",  ":portspec", expected_outcodes: [0,1]
             )
             begin
+                puts "Checking port: #{@port}"
                 output = line.run(portspec: ":#{@port}")
                 # lsof has output if something's holding the port open
                 return output.length > 0
@@ -158,7 +178,7 @@ module SolrTasks
              resp = Net::HTTP::get_response(uri)
              return resp.body if resp.is_a?(Net::HTTPSuccess)
              @logger.warn "Unexpected response body: \n\n\n#{resp.body}\n\n------\n"
-             raise "Schema fetch failed: #{resp.status} : #{resp.message}"
+             raise "Schema fetch failed: #{resp.code} : #{resp.message}"
         end
 
         # Gets an encaspulated definition of fields, dynamic fields, and field types
@@ -200,6 +220,12 @@ module SolrTasks
             else
                 puts schema
             end
+        end
+
+        def harmonize_schema(cname,schema_config)
+            schema = Schema.new(self,cname)
+            differ = schema.create_differ(schema_config)
+            schema.harmonize
         end
 
         # Checks whether a named collection exists.
@@ -301,6 +327,11 @@ module SolrTasks
         # @return [true,false] whether the server is running after the command completes.
         def start
             return true if is_running?
+            if not @local
+                @logger.warn "Attempt to call start on remote Solr"
+                return true
+            end
+
             begin
                 start_line = Cocaine::CommandLine.new(
                     @solr_cmd,
@@ -317,6 +348,7 @@ module SolrTasks
         # issues a 'stop' command to the server
         # @return [true,false] whether the command succeeded
         def stop
+            return false unless @local
             begin 
                 stop_line = Cocaine::CommandLine.new(@solr_cmd,':args')
                 stop_line.run(args: ["stop", "-p", @port ])
@@ -531,7 +563,6 @@ module SolrTasks
                 resp = Net::HTTP.get_response(path)
                 if resp.is_a?(Net::HTTPSuccess)
                     dl_page = Nokogiri::HTML(resp.body)
-                    puts dl_page
                     dl_path = dl_page.css("a").select {
                         |link|
                         link['href'] =~ /solr-#{@version}.tgz/

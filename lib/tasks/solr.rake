@@ -23,8 +23,21 @@ else
         config = File.open(config_file) { |f| YAML.load(f) }
         puts "No solrtask.yml config file found, using defaults"  
     end
-    say = puts
+    say = method(:puts)
 end
+
+module Logginator
+    def self.say(msg)
+        if defined? Rails
+            Rails.logger.info msg
+        else
+            puts msg
+        end
+    end
+end
+
+
+say = method(:puts) unless defined? say
 
 server = SolrTasks::Server.new(config) unless config.empty?
 
@@ -32,6 +45,15 @@ server ||= SolrTasks::Server.new
 
 desc "Tasks for Solr installlation, start/stop and schema management"
 namespace :solrtask do        
+
+    say = method(:puts) unless defined? say
+
+    if not Rake::Task.task_defined?(':environment') 
+        desc "Stub 'environment' task when we're not running under Rails"
+        task :environment do
+            # pass
+        end
+    end
 
     desc "Shows configuration, including computed values"
     task :show_config => :environment do
@@ -54,7 +76,6 @@ namespace :solrtask do
 
     desc "Installs solr (if necessary)"
     task :install => :environment do
-
         if not File.exist?(server.install_dir)	
             f = SolrTasks::Fetcher.new(server.install_dir, server.version)
             f.install
@@ -69,7 +90,7 @@ namespace :solrtask do
     desc "Ensures solr is running"
     task :start => [ :environment, :install ] do
         if server.is_running?
-            say "Solr is already running on port #{server.port}"
+            Logginator.say "Solr is already running on port #{server.port}"
         else
             server.start unless server.is_running?
         end
@@ -78,7 +99,7 @@ namespace :solrtask do
     task :create_collection, [:collection_name] => [:start] do |t,args|
         collection = args[:collection_name]
         if server.collection_exists?(collection)
-            say "Collection '#{collection}' already exists'"
+            Logginator.say "Collection '#{collection}' already exists'"
         else
             server.create_collection(collection)
             say "Collection '#{collection}'' created.  You may now add files to the index"
@@ -112,6 +133,13 @@ namespace :solrtask do
             end
         end
     end
+
+    desc "Harmonizes a core/collection schema with one defined in YAML"
+    task :harmonize_schema, [ :schema, :config_file ] => [:environment,:start] do |t, args|
+        puts "Harmonizing #{args[:schema]} with #{args[:config_file]}"
+        server.harmonize_schema(args[:schema], args[:config_file])
+    end
+
 
     desc "Unloads (deletes) core (DANGEROUS)"
     task :delete_core, [ :core_name ] => [ :environment, :start ] do |t,args|
