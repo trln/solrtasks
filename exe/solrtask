@@ -242,7 +242,7 @@ when 'repack'
   end
   puts "Adding files to Solr distribution at server/solr/lib"
   options[:libfiles].each { |f|
-    puts "\t#{File.name(f)}"
+    puts "\t#{File.basename(f)}"
   }
   dest = SolrTasks::Repacker.add_libraries(
     f.target,

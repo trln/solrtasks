@@ -33,6 +33,7 @@ The installer process performs SHA-1 verification on any package it downloads, a
 
 Provides help on how to use this script, but here's a few samples:
 
+     $ solrtask repack -L path/to/my/solr/libs # adds .jar files in directory to SOLR_HOME, creating a custom Solr distribution with extra libraries.
      $ solrtask install # installs solr under ./solr-dir/solr-VERSION if it isn't already installed there
      $ solrtask start # starts a local solr
      $ solrtask stop # stops a local solr
