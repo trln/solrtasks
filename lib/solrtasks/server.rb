@@ -14,14 +14,14 @@ require 'yaml'
 require 'logger'
 
 module SolrTasks
+  autoload(:Schema, 'solrtasks/schema')
+  autoload(:Repacker, 'solrtasks/repacker')
 
-    autoload(:Schema, 'solrtasks/schema')
+  class << self
+    attr_accessor :logger
+  end
 
-    class << self
-        attr_accessor :logger
-    end
-    self.logger = Logger.new(STDOUT)
-
+  self.logger = Logger.new(STDOUT)
 
     DEFAULT_CONFIG  = { 
         :version => '6.3.0',
@@ -95,8 +95,8 @@ module SolrTasks
             @instance_dir = File.join(@install_dir, "solr-#{@version}/")
             @solr_cmd = File.join(@instance_dir, "bin/solr")
             @config.update({ :install_dir => @install_dir, :solr_cmd => @solr_cmd, :port => @port, :version => @version })
-            Cocaine::CommandLine.logger = Logger.new(logger) if @config[:verbose]
             @logger = options[:logger] || SolrTasks.logger
+            Cocaine::CommandLine.logger = @logger if @config[:verbose]
         end
 
         # Checks whether the server is running
@@ -508,13 +508,14 @@ module SolrTasks
             e.extract
         end
 
-        def install
-            if not installed?
-                SolrTasks.logger.info "Solr #{@version} not found.   installing"
-                fetch
-                verify
-                unpack
-            end
+        def install(do_unpack = true)
+          unless installed?
+            SolrTasks.logger.info "Solr #{@version} not found.   installing"
+              fetch
+              verify
+              unpack if do_unpack
+          end
+          @target
         end
 
         def verify
