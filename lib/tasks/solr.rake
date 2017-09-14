@@ -5,38 +5,26 @@ require 'pp'
 
 RAILS_CONFIG = 'config/solrtask.yml'.freeze
 
+logger = defined? Rails ? Rails.logger : Logger.new($stderr)
+
 config = {}
 if defined?(Rails)
   rails_environment = Rails.env || 'development'
   config_file = File.join(Rails.root, RAILS_CONFIG)
   if File.exist?(config_file)
-    puts "Loading config from #{config_file}"
-    config = File.open(config_file) { |f| YAML.safe_load(f)[rails_environment] }
-    Rails.logger.warn "Unable to find configuration for environment '#{rails_environment}', using defaults" if config.empty?
+    # load with alias support
+    config = File.open(config_file) { |f| YAML.safe_load(f,[],[],true)[rails_environment] }
+    logger.warn "Unable to find configuration for environment '#{rails_environment}', using defaults" if config.empty?
   else
-    Rails.logger.warn "No #{RAILS_CONFIG} found, using defaults"
+    logger.debug "No #{RAILS_CONFIG} found, using defaults"
   end
-  say = ->(msg) { Rails.logger.info msg }
 else
   config_file = ENV['SOLRTASK_CONFIG'] || 'solrtask.yml'
   if File.exist?(config_file)
     config = File.open(config_file) { |f| YAML.safe_load(f) }
-    puts 'No solrtask.yml config file found, using defaults'
-  end
-  say = method(:puts)
-end
-
-module Logginator
-  def self.say(msg)
-    if defined? Rails
-      Rails.logger.info msg
-    else
-      puts msg
-    end
+    logger.debug 'No solrtask.yml config file found, using defaults'
   end
 end
-
-say = method(:puts) unless defined? say
 
 server = SolrTasks::Server.new(config) unless config.empty?
 
@@ -44,8 +32,6 @@ server ||= SolrTasks::Server.new
 
 desc 'Tasks for Solr installlation, start/stop and schema management'
 namespace :solrtask do
-  say = method(:puts) unless defined? say
-
   unless Rake::Task.task_defined?(':environment')
     desc "Stub 'environment' task when we're not running under Rails"
     task :environment do
@@ -55,15 +41,14 @@ namespace :solrtask do
 
   desc 'Shows configuration, including computed values'
   task show_config: :environment do
-    pp server.config
-    puts "Base confguration loaded from #{config_file}" if File.exist?(config_file)
+    logger.info "Base confguration loaded from #{config_file}" if File.exist?(config_file)
   end
 
   desc 'Lists available collections'
   task collections: :environment do
     colls = server.get_collections
     if colls.empty?
-      puts 'No collections found'
+      logger.warn 'No collections found'
     else
       puts 'Collections:'
       colls.each do |c|
@@ -88,7 +73,7 @@ namespace :solrtask do
   desc 'Ensures solr is running'
   task start: %i[environment install] do
     if server.is_running?
-      Logginator.say "Solr is already running on port #{server.port}"
+      logger.info "Solr is already running on port #{server.port}"
     else
       server.start unless server.is_running?
     end
@@ -97,10 +82,10 @@ namespace :solrtask do
   task :create_collection, [:collection_name] => [:start] do |_t, args|
     collection = args[:collection_name]
     if server.collection_exists?(collection)
-      Logginator.say "Collection '#{collection}' already exists'"
+      logger.warn "Collection '#{collection}' already exists'"
     else
       server.create_collection(collection)
-      say "Collection '#{collection}'' created.  You may now add files to the index"
+      logger.info "Collection '#{collection}'' created.  You may now add files to the index"
     end
   end
 
@@ -108,10 +93,10 @@ namespace :solrtask do
   task :create_core, [:core_name] => %i[environment start] do |_t, args|
     core = args[:core_name]
     if server.core_exists?(core)
-      say "Core '#{core}'' already exists."
+      logger.warn "Core '#{core}'' already exists."
     else
       server.create_core(core)
-      say "Core '#{core}' created.  You may now add files to the index"
+      logger.info "Core '#{core}' created.  You may now add files to the index"
     end
   end
 
@@ -148,7 +133,7 @@ namespace :solrtask do
   end
 
   desc 'Creates a Solr distribution that includes extra (local) library files'
-  task :add_libraries [:library_files] => %i[environment] do |_t, args|
+  task :add_libraries, [:library_files] => %i[environment] do |_t, args|
     library_files = args[:library_files]
     library_files = [library_files] unless library_files.is_a?(Array)
     library_files.map do |x|
