@@ -1,9 +1,15 @@
 #!/usr/bin/env ruby
 
+$LOAD_PATH.unshift(File.expand_path('../lib', __dir__))
+
+puts $LOAD_PATH
+
+
 require 'fileutils'
 require 'optparse'
 require 'solrtasks'
 require 'pathname'
+
 
 options = {
   cache_dir: File.expand_path('.solrtask', '~'),
