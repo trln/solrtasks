@@ -2,22 +2,19 @@
 
 $LOAD_PATH.unshift(File.expand_path('../lib', __dir__))
 
-puts $LOAD_PATH
-
-
 require 'fileutils'
 require 'optparse'
 require 'solrtasks'
 require 'pathname'
-
 
 options = {
   cache_dir: File.expand_path('.solrtask', '~'),
   local: true,
   uri_base: 'http://localhost:8983/solr',
   install_base: File.expand_path('solr-dir'),
-  default_version: '6.6.0',
-  libfiles: []
+  default_version: '8.2.0',
+  libfiles: [],
+  debug: false
 }
 
 version_set = false
@@ -28,10 +25,10 @@ def_install = Pathname.new(options[:install_base]).relative_path_from(current_pa
 def_solr = Pathname.new(options[:install_base]).join("solr-#{options[:version]}").relative_path_from(current_path)
 
 
-_tasks = %w[status start stop install collections cores schema fieldsi create-collection harmonize-schema repack]
+_tasks = %w[download status start stop install collections cores schema fields create-collection harmonize-schema repack]
 
 hopts = OptionParser.new do |opts|
-  opts.banner = 'Usage: solrtask [options] task [core/collection]'
+  opts.banner = 'Usage: solrtask [options] [task] [core/collection]'
   opts.banner << "\ntask is one of:\n\t#{_tasks.join('|')}"
   opts.banner << "\n\nThe final argument is required for the 'schema' and 'fields' tasks.\n\nOptions: \n\n"
 
@@ -92,6 +89,10 @@ hopts = OptionParser.new do |opts|
     options[:noop] = true
   end
 
+  opts.on('-d', '--debug', 'Log verbosely', default: false) do
+    options[:debug] = true
+  end
+
   opts.on('-h', '--help', 'Print help for this command') do
     puts opts
     exit 0
@@ -105,6 +106,8 @@ command = ARGV.shift || 'status'
 if %w[schema fields create-collection harmonize-schema].include? command
   (cname = ARGV.shift) || raise("[core/collection name] is required for the '#{command}'' command")
 end
+
+SolrTasks.logger.level = :debug if options[:debug]
 
 # functions for querying and persisting current Solr version number
 
@@ -179,8 +182,15 @@ def status(server)
   end
 end
 
+def download(server, options)
+  return unless options[:local]
+
+  SolrTasks::Fetcher.new('.', server.version).download
+end
+
 def install(server, options)
   return unless options[:local]
+
   if !installed?(server)
     puts "\tSolr not found in #{server.install_dir}."
     if !(options[:noop])
@@ -210,18 +220,20 @@ def if_running(server)
 end
 
 case command
+when 'download'
+  puts("Fetching Solr #{server.version} from Apache")
+  download(server, options) ? 0 : 1
 when 'install'
   install(server, options)
 when 'status'
   msg, es = status(server)
-  puts msg
+  puts(msg)
   exit es
 when 'start'
   raise "You must 'install 'the server first" unless installed?(server)
   start(server)
 when 'stop'
   stop(server)
-
 when 'create-collection'
   puts if_running(server) { server.create_collection(cname) }
 when 'collections'
@@ -237,18 +249,18 @@ when 'fields'
   puts if_running(server) { server.get_fields(cname) }
 when 'repack'
   if options[:libfiles].empty?
-    puts 'Did not find any files matching -L or --libs parameter'
+    warn('Did not find any files matching -L or --libs parameter')
     exit 1
   end
 
   f = SolrTasks::Fetcher.new(server.install_dir, server.version)
   unless File.exist?(f.target) 
-    puts "Fetching Solr #{server.version} from Apache"
+    puts("Fetching Solr #{server.version} from Apache")
     f.install(false)
   end
   puts "Adding files to Solr distribution at server/solr/lib"
   options[:libfiles].each { |f|
-    puts "\t#{File.basename(f)}"
+    puts("\t#{File.basename(f)}")
   }
   dest = SolrTasks::Repacker.add_libraries(
     f.target,
@@ -257,8 +269,7 @@ when 'repack'
   )
   puts "Enhanced Solr distribution created in #{dest}"
 else
-
-  puts hopts
-  puts "\n\nUnknown task '#{command}'"
+  warn(hopts)
+  warn("\n\n\tunknown task '#{command}'")
   exit 2
 end
