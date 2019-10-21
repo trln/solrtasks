@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'logger'
 require 'yaml'
 require 'net/http'
@@ -34,5 +36,5 @@ module SolrTasks
     attr_accessor :logger
   end
 
-  self.logger = Logger.new(STDOUT)
+  self.logger = Logger.new(STDERR, level: :info)
 end
