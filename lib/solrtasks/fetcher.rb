@@ -158,8 +158,12 @@ module SolrTasks
         # force https; we will cull them later
         paths = servers.collect { |s| URI.join(s.gsub(/^http:/, 'https:'), path_info, filename) }
       end
-      # add the US backup site as a first last resort ...
-      paths << URI.join(data['backup'][1], path_info, filename)
+      if data.fetch('backup', []).length > 0
+        # add the US backup site as a first last resort ...
+        paths << URI.join(data['backup'][0], path_info, filename)
+      else
+        warn("No backup download sites found in API response")
+      end
       # add the Archive site as a last last resort ...
       paths << URI.join('https://archive.apache.org/dist/', path_info, filename)
     end
