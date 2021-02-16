@@ -1,5 +1,5 @@
 describe SolrTasks::Fetcher do
-  let(:modern) { described_class.new('.', '8.2.0') }
+  let(:modern) { described_class.new('.', '8.8.0') }
 
   let(:archive) { described_class.new('.', '7.7.1') }
 
